@@ -1,0 +1,19 @@
+{
+  "name": "citrus-agent",
+  "version": "1.0.0",
+  "description": "Citrus Host System Agent",
+  "main": "src/agent.js",
+  "scripts": {
+    "start": "node src/agent.js",
+    "dev": "nodemon src/agent.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "systeminformation": "^5.21.24",
+    "dotenv": "^16.4.1",
+    "node-os-utils": "^1.3.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+} 
