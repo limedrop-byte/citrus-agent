@@ -14,10 +14,12 @@ class CitrusAgent {
     this.ws = null;
     this.reconnectTimeout = 5000;
     this.statusInterval = null;
+    this.gitVersion = null;
   }
 
   async start() {
     console.log('Starting Citrus Agent...');
+    await this.getGitVersion();
     this.connect();
     this.startStatusUpdates();
   }
@@ -76,7 +78,22 @@ class CitrusAgent {
     }, 30000); // Every 30 seconds
   }
 
+  async getGitVersion() {
+    try {
+      const { stdout } = await execAsync('git rev-parse HEAD');
+      this.gitVersion = stdout.trim();
+      console.log(`Git version: ${this.gitVersion}`);
+      return this.gitVersion;
+    } catch (error) {
+      console.error('Error getting git version:', error);
+      this.gitVersion = 'unknown';
+      return this.gitVersion;
+    }
+  }
+
   async collectStatus() {
+    await this.getGitVersion();
+    
     const [cpu, mem, disk] = await Promise.all([
       si.currentLoad(),
       si.mem(),
@@ -86,6 +103,7 @@ class CitrusAgent {
     return {
       hostname: os.hostname(),
       uptime: os.uptime(),
+      gitVersion: this.gitVersion,
       cpu: {
         load: cpu.currentLoad,
         cores: os.cpus().length
@@ -117,6 +135,9 @@ class CitrusAgent {
         break;
       case 'key_rotation':
         await this.handleKeyRotation(message);
+        break;
+      case 'update_agent':
+        await this.handleUpdateAgent(message);
         break;
       default:
         console.log('Unknown message type:', message.type);
@@ -202,6 +223,43 @@ class CitrusAgent {
     } catch (error) {
       this.send({
         type: 'key_rotation',
+        status: 'failed',
+        error: error.message
+      });
+    }
+  }
+
+  async handleUpdateAgent(message) {
+    try {
+      this.send({
+        type: 'update_operation',
+        status: 'starting'
+      });
+      
+      console.log('Updating agent from git...');
+      
+      // Pull latest changes from git
+      const { stdout, stderr } = await execAsync('git pull');
+      
+      if (stderr && !stderr.includes('Already up to date')) {
+        throw new Error(`Git pull error: ${stderr}`);
+      }
+      
+      // Get the new git version
+      await this.getGitVersion();
+      
+      this.send({
+        type: 'update_operation',
+        status: 'completed',
+        gitVersion: this.gitVersion,
+        output: stdout
+      });
+      
+      console.log('Agent updated successfully');
+    } catch (error) {
+      console.error('Error updating agent:', error);
+      this.send({
+        type: 'update_operation',
         status: 'failed',
         error: error.message
       });
