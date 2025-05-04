@@ -241,18 +241,30 @@ class CitrusAgent {
       // Pull latest changes from git
       const { stdout, stderr } = await execAsync('git pull');
       
-      if (stderr && !stderr.includes('Already up to date')) {
+      // Git information messages often go to stderr even during successful operations.
+      // Only consider it an error if it contains specific error indicators.
+      const errorIndicators = [
+        'fatal:', 'error:', 'cannot', 'denied', 'Could not', 'not found', 
+        'failed', 'unable to', 'unresolved', 'Permission denied'
+      ];
+      
+      const hasRealError = errorIndicators.some(indicator => 
+        stderr.toLowerCase().includes(indicator.toLowerCase())
+      );
+      
+      if (hasRealError) {
         throw new Error(`Git pull error: ${stderr}`);
       }
       
       // Get the new git version
       await this.getGitVersion();
       
+      // Successful update
       this.send({
         type: 'update_operation',
         status: 'completed',
         gitVersion: this.gitVersion,
-        output: stdout
+        output: stdout + (stderr ? `\n${stderr}` : '')
       });
       
       console.log('Agent updated successfully');
