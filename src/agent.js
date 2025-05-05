@@ -139,6 +139,9 @@ class CitrusAgent {
       case 'update_agent':
         await this.handleUpdateAgent(message);
         break;
+      case 'rollback_agent':
+        await this.handleRollbackAgent(message);
+        break;
       default:
         console.log('Unknown message type:', message.type);
     }
@@ -236,13 +239,15 @@ class CitrusAgent {
         status: 'starting'
       });
       
-      console.log('Updating agent from git...');
+      console.log('Updating agent from git with force reset...');
       
-      // Pull latest changes from git
-      const { stdout, stderr } = await execAsync('git pull');
+      // Fetch all changes first
+      await execAsync('git fetch --all');
       
-      // Git information messages often go to stderr even during successful operations.
-      // Only consider it an error if it contains specific error indicators.
+      // Force reset to origin/main (or whatever your branch is)
+      const { stdout, stderr } = await execAsync('git reset --hard origin/main');
+      
+      // Check for errors in stderr
       const errorIndicators = [
         'fatal:', 'error:', 'cannot', 'denied', 'Could not', 'not found', 
         'failed', 'unable to', 'unresolved', 'Permission denied'
@@ -253,7 +258,7 @@ class CitrusAgent {
       );
       
       if (hasRealError) {
-        throw new Error(`Git pull error: ${stderr}`);
+        throw new Error(`Git update error: ${stderr}`);
       }
       
       // Get the new git version
@@ -272,6 +277,64 @@ class CitrusAgent {
       console.error('Error updating agent:', error);
       this.send({
         type: 'update_operation',
+        status: 'failed',
+        error: error.message
+      });
+    }
+  }
+
+  async handleRollbackAgent(message) {
+    try {
+      const { commitId } = message;
+      
+      if (!commitId) {
+        throw new Error('No commit ID provided for rollback');
+      }
+      
+      this.send({
+        type: 'rollback_operation',
+        status: 'starting',
+        commitId
+      });
+      
+      console.log(`Rolling back agent to commit: ${commitId}`);
+      
+      // Fetch all remote changes first to ensure we have the commit
+      await execAsync('git fetch --all');
+      
+      // Reset to the specific commit with force
+      const { stdout, stderr } = await execAsync(`git reset --hard ${commitId}`);
+      
+      // Check for errors in stderr
+      const errorIndicators = [
+        'fatal:', 'error:', 'cannot', 'denied', 'Could not', 'not found', 
+        'failed', 'unable to', 'unresolved', 'Permission denied', 'unknown revision'
+      ];
+      
+      const hasRealError = errorIndicators.some(indicator => 
+        stderr.toLowerCase().includes(indicator.toLowerCase())
+      );
+      
+      if (hasRealError) {
+        throw new Error(`Git rollback error: ${stderr}`);
+      }
+      
+      // Get the new git version to confirm rollback
+      await this.getGitVersion();
+      
+      // Successful rollback
+      this.send({
+        type: 'rollback_operation',
+        status: 'completed',
+        gitVersion: this.gitVersion,
+        output: stdout + (stderr ? `\n${stderr}` : '')
+      });
+      
+      console.log(`Agent successfully rolled back to ${commitId}`);
+    } catch (error) {
+      console.error('Error rolling back agent:', error);
+      this.send({
+        type: 'rollback_operation',
         status: 'failed',
         error: error.message
       });
