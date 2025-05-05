@@ -272,7 +272,17 @@ class CitrusAgent {
         output: stdout + (stderr ? `\n${stderr}` : '')
       });
       
-      console.log('Agent updated successfully');
+      console.log('Agent updated successfully, restarting service...');
+      
+      // Restart the service using systemctl
+      try {
+        await execAsync('systemctl restart citrus-agent');
+        console.log('Restart command sent. Service will restart shortly.');
+      } catch (restartError) {
+        console.error('Error restarting service:', restartError);
+        // We don't throw here because the update itself was successful
+      }
+      
     } catch (error) {
       console.error('Error updating agent:', error);
       this.send({
@@ -330,7 +340,17 @@ class CitrusAgent {
         output: stdout + (stderr ? `\n${stderr}` : '')
       });
       
-      console.log(`Agent successfully rolled back to ${commitId}`);
+      console.log(`Agent successfully rolled back to ${commitId}, restarting service...`);
+      
+      // Restart the service using systemctl
+      try {
+        await execAsync('systemctl restart citrus-agent');
+        console.log('Restart command sent. Service will restart shortly.');
+      } catch (restartError) {
+        console.error('Error restarting service:', restartError);
+        // We don't throw here because the rollback itself was successful
+      }
+      
     } catch (error) {
       console.error('Error rolling back agent:', error);
       this.send({
