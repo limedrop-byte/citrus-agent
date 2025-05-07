@@ -21,7 +21,6 @@ class CitrusAgent {
     console.log('Starting Citrus Agent...');
     await this.getGitVersion();
     this.connect();
-    this.startStatusUpdates();
   }
 
   connect() {
@@ -37,7 +36,15 @@ class CitrusAgent {
 
     this.ws.on('open', () => {
       console.log('Connected to Engine');
-      this.sendInitialStatus();
+      
+      // Send immediate agent_connected message
+      this.send({
+        type: 'agent_connected',
+        agentId: this.agentId
+      });
+
+      // Start sending status updates with 1-minute interval
+      this.startStatusUpdates();
     });
 
     this.ws.on('message', async (data) => {
@@ -60,22 +67,20 @@ class CitrusAgent {
     });
   }
 
-  async sendInitialStatus() {
-    const status = await this.collectStatus();
-    this.send({
-      type: 'initial_status',
-      status
-    });
-  }
-
   startStatusUpdates() {
+    // Clear any existing interval
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval);
+    }
+
+    // Start new interval with 1-minute updates
     this.statusInterval = setInterval(async () => {
       const status = await this.collectStatus();
       this.send({
         type: 'status_update',
         status
       });
-    }, 30000); // Every 30 seconds
+    }, 60000); // Every 1 minute
   }
 
   async getGitVersion() {
@@ -372,6 +377,10 @@ class CitrusAgent {
   }
 }
 
-// Start the agent
-const agent = new CitrusAgent();
-agent.start(); 
+// Start the agent if this file is run directly
+if (require.main === module) {
+    const agent = new CitrusAgent();
+    agent.start();
+}
+
+module.exports = CitrusAgent; 
