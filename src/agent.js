@@ -155,6 +155,8 @@ class CitrusAgent {
   async handleCreateSite(message) {
     const { domain, options } = message;
     
+    console.log('Received create site request for domain:', domain);
+    
     try {
       this.send({
         type: 'site_operation',
@@ -162,9 +164,13 @@ class CitrusAgent {
         status: 'starting',
         domain
       });
+      console.log('Sent starting status for domain:', domain);
 
       const command = `ee site create ${domain} --type=wp --cache`;
+      console.log('Executing command:', command);
       const { stdout, stderr } = await execAsync(command);
+      console.log('Command output:', stdout);
+      if (stderr) console.error('Command stderr:', stderr);
 
       this.send({
         type: 'site_operation',
@@ -173,7 +179,9 @@ class CitrusAgent {
         domain,
         output: stdout
       });
+      console.log('Sent completed status for domain:', domain);
     } catch (error) {
+      console.error('Error creating site:', error);
       this.send({
         type: 'site_operation',
         operation: 'create',
@@ -181,6 +189,7 @@ class CitrusAgent {
         domain,
         error: error.message
       });
+      console.log('Sent failed status for domain:', domain);
     }
   }
 
