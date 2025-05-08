@@ -50,9 +50,21 @@ class CitrusAgent {
     this.ws.on('message', async (data) => {
       try {
         const message = JSON.parse(data);
+        console.log('Received message from Engine:', {
+          type: message.type,
+          commanderId: message.commanderId,
+          domain: message.domain
+        });
+        
         await this.handleMessage(message);
       } catch (error) {
         console.error('Error handling message:', error);
+        // Send error back to engine
+        this.send({
+          type: 'error',
+          error: error.message,
+          originalMessage: data.toString()
+        });
       }
     });
 
