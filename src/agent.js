@@ -217,7 +217,7 @@ class CitrusAgent {
         domain
       });
 
-      const command = `wo site delete ${domain} --yes`;
+      const command = `wo site delete ${domain} --no-prompt`;
       const { stdout } = await execAsync(command);
 
       this.send({
