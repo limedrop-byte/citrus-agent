@@ -1,7 +1,7 @@
 const WebSocket = require('ws');
 const si = require('systeminformation');
 const os = require('os');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
 require('dotenv').config();
@@ -262,20 +262,74 @@ class CitrusAgent {
       });
       
       console.log(`Deploying SSL for domain: ${domain}`);
-      const command = `wo site update ${domain} -le`;
-      console.log('Executing command:', command);
-      const { stdout, stderr } = await execAsync(command);
-      console.log('Command output:', stdout);
-      if (stderr) console.error('Command stderr:', stderr);
-
-      this.send({
-        type: 'site_operation',
-        operation: 'deploy_ssl',
-        status: 'completed',
-        domain,
-        output: stdout
+      
+      // Use spawn instead of exec to handle interactive prompts
+      return new Promise((resolve, reject) => {
+        console.log('Executing command: wo site update', domain, '-le');
+        
+        const child = spawn('wo', ['site', 'update', domain, '-le'], {
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+        
+        let stdoutData = '';
+        let stderrData = '';
+        
+        child.stdout.on('data', (data) => {
+          const output = data.toString();
+          stdoutData += output;
+          console.log('Command output:', output);
+          
+          // Check for certificate prompt and respond with '1'
+          if (output.includes('Please select an option from below') && 
+              output.includes('1: Reinstall existing certificate') &&
+              output.includes('Type the appropriate number')) {
+            console.log('Certificate prompt detected, selecting option 1 (Reinstall existing certificate)');
+            child.stdin.write('1\n');
+          }
+        });
+        
+        child.stderr.on('data', (data) => {
+          stderrData += data.toString();
+          console.error('Command stderr:', data.toString());
+        });
+        
+        child.on('close', (code) => {
+          if (code === 0) {
+            console.log('SSL deployment completed for domain:', domain);
+            this.send({
+              type: 'site_operation',
+              operation: 'deploy_ssl',
+              status: 'completed',
+              domain,
+              output: stdoutData
+            });
+            resolve();
+          } else {
+            const errorMessage = `SSL deployment failed with code ${code}: ${stderrData}`;
+            console.error(errorMessage);
+            this.send({
+              type: 'site_operation',
+              operation: 'deploy_ssl',
+              status: 'failed',
+              domain,
+              error: errorMessage
+            });
+            reject(new Error(errorMessage));
+          }
+        });
+        
+        child.on('error', (err) => {
+          console.error('Error spawning process:', err);
+          this.send({
+            type: 'site_operation',
+            operation: 'deploy_ssl',
+            status: 'failed',
+            domain,
+            error: err.message
+          });
+          reject(err);
+        });
       });
-      console.log('SSL deployment completed for domain:', domain);
     } catch (error) {
       console.error('Error deploying SSL:', error);
       this.send({
