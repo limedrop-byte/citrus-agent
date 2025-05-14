@@ -150,33 +150,44 @@ class CitrusAgent {
   }
 
   async handleMessage(message) {
-    console.log('Received message:', message.type, 'Full message:', JSON.stringify(message));
-
-    switch (message.type) {
-      case 'create_site':
-        console.log('Handling create_site message for domain:', message.domain);
-        await this.handleCreateSite(message);
-        break;
-      case 'delete_site':
-        await this.handleDeleteSite(message);
-        break;
-      case 'deploy_ssl':
-        await this.handleDeploySSL(message);
-        break;
-      case 'site_update':
-        await this.handleSiteUpdate(message);
-        break;
-      case 'key_rotation':
-        await this.handleKeyRotation(message);
-        break;
-      case 'update_agent':
-        await this.handleUpdateAgent(message);
-        break;
-      case 'rollback_agent':
-        await this.handleRollbackAgent(message);
-        break;
-      default:
-        console.log('Unknown message type:', message.type);
+    try {
+      console.log('Received message:', message.type, 'Full message:', JSON.stringify(message));
+      
+      switch (message.type) {
+        case 'create_site':
+          await this.handleCreateSite(message);
+          break;
+        case 'delete_site':
+          await this.handleDeleteSite(message);
+          break;
+        case 'deploy_ssl':
+          await this.handleDeploySSL(message);
+          break;
+        case 'turn_off_ssl':
+          await this.handleTurnOffSSL(message);
+          break;
+        case 'update_agent':
+          await this.handleUpdateAgent(message);
+          break;
+        case 'rollback_agent':
+          await this.handleRollbackAgent(message);
+          break;
+        case 'key_rotation':
+          await this.handleKeyRotation(message);
+          break;
+        default:
+          console.log('Unknown message type:', message.type);
+          this.send({
+            type: 'error',
+            error: `Unknown message type: ${message.type}`
+          });
+      }
+    } catch (error) {
+      console.error('Error handling message:', error);
+      this.send({
+        type: 'error',
+        error: error.message
+      });
     }
   }
 
@@ -346,6 +357,91 @@ class CitrusAgent {
     }
   }
 
+  async handleTurnOffSSL(message) {
+    const { domain } = message;
+    
+    try {
+      this.send({
+        type: 'site_operation',
+        operation: 'turn_off_ssl',
+        status: 'starting',
+        domain
+      });
+      
+      console.log(`Turning off SSL for domain: ${domain}`);
+      
+      // Use spawn instead of exec to handle any interactive prompts
+      return new Promise((resolve, reject) => {
+        console.log('Executing command: wo site update', domain, '--letsencrypt=off');
+        
+        const child = spawn('wo', ['site', 'update', domain, '--letsencrypt=off'], {
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+        
+        let stdoutData = '';
+        let stderrData = '';
+        
+        child.stdout.on('data', (data) => {
+          const output = data.toString();
+          stdoutData += output;
+          console.log('Command output:', output);
+        });
+        
+        child.stderr.on('data', (data) => {
+          stderrData += data.toString();
+          console.error('Command stderr:', data.toString());
+        });
+        
+        child.on('close', (code) => {
+          if (code === 0) {
+            console.log('SSL successfully turned off for domain:', domain);
+            this.send({
+              type: 'site_operation',
+              operation: 'turn_off_ssl',
+              status: 'completed',
+              domain,
+              output: stdoutData
+            });
+            resolve();
+          } else {
+            const errorMessage = `Failed to turn off SSL with code ${code}: ${stderrData}`;
+            console.error(errorMessage);
+            this.send({
+              type: 'site_operation',
+              operation: 'turn_off_ssl',
+              status: 'failed',
+              domain,
+              error: errorMessage
+            });
+            reject(new Error(errorMessage));
+          }
+        });
+        
+        child.on('error', (err) => {
+          console.error('Error spawning process:', err);
+          this.send({
+            type: 'site_operation',
+            operation: 'turn_off_ssl',
+            status: 'failed',
+            domain,
+            error: err.message
+          });
+          reject(err);
+        });
+      });
+    } catch (error) {
+      console.error('Error turning off SSL:', error);
+      this.send({
+        type: 'site_operation',
+        operation: 'turn_off_ssl',
+        status: 'failed',
+        domain,
+        error: error.message
+      });
+      console.log('Failed to turn off SSL for domain:', domain);
+    }
+  }
+
   async handleKeyRotation(message) {
     const { newKey } = message;
     
@@ -491,80 +587,6 @@ class CitrusAgent {
       this.send({
         type: 'rollback_operation',
         status: 'failed',
-        error: error.message
-      });
-    }
-  }
-
-  // Add new handler for site_update command
-  async handleSiteUpdate(message) {
-    const { domain, options } = message;
-    
-    try {
-      this.send({
-        type: 'site_operation',
-        operation: 'update',
-        status: 'starting',
-        domain
-      });
-      
-      console.log(`Updating site: ${domain} with options:`, options);
-      
-      // Handle turning off SSL if specified in options
-      if (options && options.letsencrypt === 'off') {
-        console.log(`Turning off SSL for domain: ${domain}`);
-        
-        const command = `wo site update ${domain} --letsencrypt=off`;
-        console.log('Executing command:', command);
-        
-        const { stdout, stderr } = await execAsync(command);
-        console.log('Command output:', stdout);
-        if (stderr) console.error('Command stderr:', stderr);
-        
-        this.send({
-          type: 'site_operation',
-          operation: 'update',
-          status: 'completed',
-          domain,
-          action: 'ssl_disabled',
-          output: stdout
-        });
-        
-        console.log(`SSL successfully turned off for domain: ${domain}`);
-      } else {
-        // Handle other site update options here if needed
-        const updateOptions = [];
-        
-        if (options) {
-          Object.entries(options).forEach(([key, value]) => {
-            updateOptions.push(`--${key}=${value}`);
-          });
-        }
-        
-        const command = `wo site update ${domain} ${updateOptions.join(' ')}`;
-        console.log('Executing command:', command);
-        
-        const { stdout, stderr } = await execAsync(command);
-        console.log('Command output:', stdout);
-        if (stderr) console.error('Command stderr:', stderr);
-        
-        this.send({
-          type: 'site_operation',
-          operation: 'update',
-          status: 'completed',
-          domain,
-          output: stdout
-        });
-        
-        console.log(`Site ${domain} updated successfully`);
-      }
-    } catch (error) {
-      console.error(`Error updating site ${domain}:`, error);
-      this.send({
-        type: 'site_operation',
-        operation: 'update',
-        status: 'failed',
-        domain,
         error: error.message
       });
     }
