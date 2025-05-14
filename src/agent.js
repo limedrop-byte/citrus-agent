@@ -43,6 +43,15 @@ class CitrusAgent {
         agentId: this.agentId
       });
 
+      // Send a message to clear any running commands
+      // This helps when the agent restarts after an update
+      this.send({
+        type: 'clear_command_state',
+        agentId: this.agentId,
+        message: 'Agent restarted, clearing previous command state'
+      });
+      console.log('Sent clear_command_state message to reset any running commands');
+
       // Start sending status updates with 1-minute interval
       this.startStatusUpdates();
     });
@@ -151,6 +160,9 @@ class CitrusAgent {
       case 'delete_site':
         await this.handleDeleteSite(message);
         break;
+      case 'deploy_ssl':
+        await this.handleDeploySSL(message);
+        break;
       case 'key_rotation':
         await this.handleKeyRotation(message);
         break;
@@ -235,6 +247,45 @@ class CitrusAgent {
         domain,
         error: error.message
       });
+    }
+  }
+
+  async handleDeploySSL(message) {
+    const { domain } = message;
+    
+    try {
+      this.send({
+        type: 'site_operation',
+        operation: 'deploy_ssl',
+        status: 'starting',
+        domain
+      });
+      
+      console.log(`Deploying SSL for domain: ${domain}`);
+      const command = `wo site update ${domain} -le`;
+      console.log('Executing command:', command);
+      const { stdout, stderr } = await execAsync(command);
+      console.log('Command output:', stdout);
+      if (stderr) console.error('Command stderr:', stderr);
+
+      this.send({
+        type: 'site_operation',
+        operation: 'deploy_ssl',
+        status: 'completed',
+        domain,
+        output: stdout
+      });
+      console.log('SSL deployment completed for domain:', domain);
+    } catch (error) {
+      console.error('Error deploying SSL:', error);
+      this.send({
+        type: 'site_operation',
+        operation: 'deploy_ssl',
+        status: 'failed',
+        domain,
+        error: error.message
+      });
+      console.log('SSL deployment failed for domain:', domain);
     }
   }
 
