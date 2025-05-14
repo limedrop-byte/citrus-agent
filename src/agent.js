@@ -178,7 +178,7 @@ class CitrusAgent {
       });
       console.log('Sent starting status for domain:', domain);
 
-      const command = `ee site create ${domain} --type=wp --cache`;
+      const command = `wo site create ${domain} --type=wp --cache`;
       console.log('Executing command:', command);
       const { stdout, stderr } = await execAsync(command);
       console.log('Command output:', stdout);
@@ -216,7 +216,7 @@ class CitrusAgent {
         domain
       });
 
-      const command = `ee site delete ${domain} --yes`;
+      const command = `wo site delete ${domain} --yes`;
       const { stdout } = await execAsync(command);
 
       this.send({
