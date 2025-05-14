@@ -141,10 +141,11 @@ class CitrusAgent {
   }
 
   async handleMessage(message) {
-    console.log('Received message:', message.type);
+    console.log('Received message:', message.type, 'Full message:', JSON.stringify(message));
 
     switch (message.type) {
       case 'create_site':
+        console.log('Handling create_site message for domain:', message.domain);
         await this.handleCreateSite(message);
         break;
       case 'delete_site':
@@ -178,7 +179,7 @@ class CitrusAgent {
       });
       console.log('Sent starting status for domain:', domain);
 
-      const command = `wo site create ${domain} --type=wp --cache`;
+      const command = `wo site create ${domain} --wp`;
       console.log('Executing command:', command);
       const { stdout, stderr } = await execAsync(command);
       console.log('Command output:', stdout);
