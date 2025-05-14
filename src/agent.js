@@ -602,7 +602,7 @@ class CitrusAgent {
       this.send({
         type: 'site_operation',
         operation: 'redeploy_ssl',
-        status: 'starting',
+        status: 'ssl_redeploying',
         domain
       });
       
