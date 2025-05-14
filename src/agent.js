@@ -163,6 +163,9 @@ class CitrusAgent {
       case 'deploy_ssl':
         await this.handleDeploySSL(message);
         break;
+      case 'site_update':
+        await this.handleSiteUpdate(message);
+        break;
       case 'key_rotation':
         await this.handleKeyRotation(message);
         break;
@@ -296,11 +299,11 @@ class CitrusAgent {
         child.on('close', (code) => {
           if (code === 0) {
             console.log('SSL deployment completed for domain:', domain);
-            this.send({
-              type: 'site_operation',
-              operation: 'deploy_ssl',
-              status: 'completed',
-              domain,
+      this.send({
+        type: 'site_operation',
+        operation: 'deploy_ssl',
+        status: 'completed',
+        domain,
               output: stdoutData
             });
             resolve();
@@ -488,6 +491,80 @@ class CitrusAgent {
       this.send({
         type: 'rollback_operation',
         status: 'failed',
+        error: error.message
+      });
+    }
+  }
+
+  // Add new handler for site_update command
+  async handleSiteUpdate(message) {
+    const { domain, options } = message;
+    
+    try {
+      this.send({
+        type: 'site_operation',
+        operation: 'update',
+        status: 'starting',
+        domain
+      });
+      
+      console.log(`Updating site: ${domain} with options:`, options);
+      
+      // Handle turning off SSL if specified in options
+      if (options && options.letsencrypt === 'off') {
+        console.log(`Turning off SSL for domain: ${domain}`);
+        
+        const command = `wo site update ${domain} --letsencrypt=off`;
+        console.log('Executing command:', command);
+        
+        const { stdout, stderr } = await execAsync(command);
+        console.log('Command output:', stdout);
+        if (stderr) console.error('Command stderr:', stderr);
+        
+        this.send({
+          type: 'site_operation',
+          operation: 'update',
+          status: 'completed',
+          domain,
+          action: 'ssl_disabled',
+          output: stdout
+        });
+        
+        console.log(`SSL successfully turned off for domain: ${domain}`);
+      } else {
+        // Handle other site update options here if needed
+        const updateOptions = [];
+        
+        if (options) {
+          Object.entries(options).forEach(([key, value]) => {
+            updateOptions.push(`--${key}=${value}`);
+          });
+        }
+        
+        const command = `wo site update ${domain} ${updateOptions.join(' ')}`;
+        console.log('Executing command:', command);
+        
+        const { stdout, stderr } = await execAsync(command);
+        console.log('Command output:', stdout);
+        if (stderr) console.error('Command stderr:', stderr);
+        
+        this.send({
+          type: 'site_operation',
+          operation: 'update',
+          status: 'completed',
+          domain,
+          output: stdout
+        });
+        
+        console.log(`Site ${domain} updated successfully`);
+      }
+    } catch (error) {
+      console.error(`Error updating site ${domain}:`, error);
+      this.send({
+        type: 'site_operation',
+        operation: 'update',
+        status: 'failed',
+        domain,
         error: error.message
       });
     }
