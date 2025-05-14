@@ -607,8 +607,52 @@ class CitrusAgent {
       });
       
       console.log(`Redeploying SSL for domain: ${domain}`);
+      console.log('First turning off SSL...');
       
-      // Use spawn instead of exec to handle interactive prompts
+      // Use spawn for the first command to turn off SSL
+      const turnOffResult = await new Promise((resolve, reject) => {
+        console.log('Executing command: wo site update', domain, '--letsencrypt=off');
+        
+        const turnOffChild = spawn('wo', ['site', 'update', domain, '--letsencrypt=off'], {
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+        
+        let turnOffStdoutData = '';
+        let turnOffStderrData = '';
+        
+        turnOffChild.stdout.on('data', (data) => {
+          const output = data.toString();
+          turnOffStdoutData += output;
+          console.log('Turn off SSL output:', output);
+        });
+        
+        turnOffChild.stderr.on('data', (data) => {
+          turnOffStderrData += data.toString();
+          console.error('Turn off SSL stderr:', data.toString());
+        });
+        
+        turnOffChild.on('close', (code) => {
+          if (code === 0) {
+            console.log('SSL successfully turned off for domain:', domain);
+            resolve(true);
+          } else {
+            // Even if turning off fails, we'll still try to redeploy
+            // Sometimes the SSL might not be active yet
+            console.warn(`Warning: Failed to turn off SSL with code ${code}: ${turnOffStderrData}`);
+            resolve(false);
+          }
+        });
+        
+        turnOffChild.on('error', (err) => {
+          console.error('Error spawning turn off SSL process:', err);
+          // Continue with redeploy even if turn off fails
+          resolve(false);
+        });
+      });
+      
+      console.log('Now deploying SSL with force renewal...');
+      
+      // Use spawn for the second command to deploy SSL
       return new Promise((resolve, reject) => {
         console.log('Executing command: wo site update', domain, '-le');
         
@@ -624,7 +668,7 @@ class CitrusAgent {
           stdoutData += output;
           console.log('Command output:', output);
           
-          // Check for certificate prompt and respond with '2' for redeployment
+          // Check for certificate prompt and always choose option 2 for force renewal
           if (output.includes('Please select an option from below') && 
               output.includes('Type the appropriate number')) {
             console.log('Certificate prompt detected, selecting option 2 (Force renewal)');
