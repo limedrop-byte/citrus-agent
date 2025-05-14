@@ -163,6 +163,9 @@ class CitrusAgent {
         case 'deploy_ssl':
           await this.handleDeploySSL(message);
           break;
+        case 'redeploy_ssl':
+          await this.handleRedeploySSL(message);
+          break;
         case 'turn_off_ssl':
           await this.handleTurnOffSSL(message);
           break;
@@ -589,6 +592,98 @@ class CitrusAgent {
         status: 'failed',
         error: error.message
       });
+    }
+  }
+
+  async handleRedeploySSL(message) {
+    const { domain } = message;
+    
+    try {
+      this.send({
+        type: 'site_operation',
+        operation: 'redeploy_ssl',
+        status: 'starting',
+        domain
+      });
+      
+      console.log(`Redeploying SSL for domain: ${domain}`);
+      
+      // Use spawn instead of exec to handle interactive prompts
+      return new Promise((resolve, reject) => {
+        console.log('Executing command: wo site update', domain, '-le');
+        
+        const child = spawn('wo', ['site', 'update', domain, '-le'], {
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+        
+        let stdoutData = '';
+        let stderrData = '';
+        
+        child.stdout.on('data', (data) => {
+          const output = data.toString();
+          stdoutData += output;
+          console.log('Command output:', output);
+          
+          // Check for certificate prompt and respond with '2' for redeployment
+          if (output.includes('Please select an option from below') && 
+              output.includes('Type the appropriate number')) {
+            console.log('Certificate prompt detected, selecting option 2 (Force renewal)');
+            child.stdin.write('2\n');
+          }
+        });
+        
+        child.stderr.on('data', (data) => {
+          stderrData += data.toString();
+          console.error('Command stderr:', data.toString());
+        });
+        
+        child.on('close', (code) => {
+          if (code === 0) {
+            console.log('SSL redeployment completed for domain:', domain);
+            this.send({
+              type: 'site_operation',
+              operation: 'redeploy_ssl',
+              status: 'completed',
+              domain,
+              output: stdoutData
+            });
+            resolve();
+          } else {
+            const errorMessage = `SSL redeployment failed with code ${code}: ${stderrData}`;
+            console.error(errorMessage);
+            this.send({
+              type: 'site_operation',
+              operation: 'redeploy_ssl',
+              status: 'failed',
+              domain,
+              error: errorMessage
+            });
+            reject(new Error(errorMessage));
+          }
+        });
+        
+        child.on('error', (err) => {
+          console.error('Error spawning process:', err);
+          this.send({
+            type: 'site_operation',
+            operation: 'redeploy_ssl',
+            status: 'failed',
+            domain,
+            error: err.message
+          });
+          reject(err);
+        });
+      });
+    } catch (error) {
+      console.error('Error redeploying SSL:', error);
+      this.send({
+        type: 'site_operation',
+        operation: 'redeploy_ssl',
+        status: 'failed',
+        domain,
+        error: error.message
+      });
+      console.log('SSL redeployment failed for domain:', domain);
     }
   }
 
