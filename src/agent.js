@@ -178,6 +178,9 @@ class CitrusAgent {
         case 'key_rotation':
           await this.handleKeyRotation(message);
           break;
+        case 'site_info':
+          await this.handleSiteInfo(message);
+          break;
         default:
           console.log('Unknown message type:', message.type);
           this.send({
@@ -728,6 +731,44 @@ class CitrusAgent {
         error: error.message
       });
       console.log('SSL redeployment failed for domain:', domain);
+    }
+  }
+
+  async handleSiteInfo(message) {
+    const { domain } = message;
+    
+    try {
+      console.log(`Checking site info for domain: ${domain}`);
+      
+      // Get site info using wo command
+      const command = `wo site info ${domain} --json`;
+      const { stdout } = await execAsync(command);
+      
+      // Parse the JSON output
+      const siteInfo = JSON.parse(stdout);
+      
+      // Extract SSL status
+      const ssl = {
+        enabled: siteInfo.ssl_enabled || false,
+        provider: siteInfo.ssl_provider || null,
+        expiry: siteInfo.ssl_expiry || null
+      };
+      
+      // Send response back to engine
+      this.send({
+        type: 'site_info_response',
+        domain,
+        ssl
+      });
+      
+      console.log(`Sent site info response for ${domain}:`, ssl);
+    } catch (error) {
+      console.error(`Error getting site info for ${domain}:`, error);
+      this.send({
+        type: 'error',
+        error: `Failed to get site info: ${error.message}`,
+        domain
+      });
     }
   }
 
