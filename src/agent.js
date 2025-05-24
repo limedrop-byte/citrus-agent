@@ -154,21 +154,6 @@ class CitrusAgent {
       console.log('Received message:', message.type, 'Full message:', JSON.stringify(message));
       
       switch (message.type) {
-        case 'create_site':
-          await this.handleCreateSite(message);
-          break;
-        case 'delete_site':
-          await this.handleDeleteSite(message);
-          break;
-        case 'deploy_ssl':
-          await this.handleDeploySSL(message);
-          break;
-        case 'redeploy_ssl':
-          await this.handleRedeploySSL(message);
-          break;
-        case 'turn_off_ssl':
-          await this.handleTurnOffSSL(message);
-          break;
         case 'update_agent':
           await this.handleUpdateAgent(message);
           break;
@@ -177,9 +162,6 @@ class CitrusAgent {
           break;
         case 'key_rotation':
           await this.handleKeyRotation(message);
-          break;
-        case 'site_info':
-          await this.handleSiteInfo(message);
           break;
         default:
           console.log('Unknown message type:', message.type);
@@ -194,257 +176,6 @@ class CitrusAgent {
         type: 'error',
         error: error.message
       });
-    }
-  }
-
-  async handleCreateSite(message) {
-    const { domain, options } = message;
-    
-    console.log('Received create site request for domain:', domain);
-    
-    try {
-      this.send({
-        type: 'site_operation',
-        operation: 'create',
-        status: 'starting',
-        domain
-      });
-      console.log('Sent starting status for domain:', domain);
-
-      const command = `wo site create ${domain} --wp`;
-      console.log('Executing command:', command);
-      const { stdout, stderr } = await execAsync(command);
-      console.log('Command output:', stdout);
-      if (stderr) console.error('Command stderr:', stderr);
-
-      this.send({
-        type: 'site_operation',
-        operation: 'create',
-        status: 'completed',
-        domain,
-        output: stdout
-      });
-      console.log('Sent completed status for domain:', domain);
-    } catch (error) {
-      console.error('Error creating site:', error);
-      this.send({
-        type: 'site_operation',
-        operation: 'create',
-        status: 'failed',
-        domain,
-        error: error.message
-      });
-      console.log('Sent failed status for domain:', domain);
-    }
-  }
-
-  async handleDeleteSite(message) {
-    const { domain } = message;
-    
-    try {
-      this.send({
-        type: 'site_operation',
-        operation: 'delete',
-        status: 'starting',
-        domain
-      });
-
-      const command = `wo site delete ${domain} --no-prompt`;
-      const { stdout } = await execAsync(command);
-
-      this.send({
-        type: 'site_operation',
-        operation: 'delete',
-        status: 'completed',
-        domain,
-        output: stdout
-      });
-    } catch (error) {
-      this.send({
-        type: 'site_operation',
-        operation: 'delete',
-        status: 'failed',
-        domain,
-        error: error.message
-      });
-    }
-  }
-
-  async handleDeploySSL(message) {
-    const { domain } = message;
-    
-    try {
-      this.send({
-        type: 'site_operation',
-        operation: 'deploy_ssl',
-        status: 'starting',
-        domain
-      });
-      
-      console.log(`Deploying SSL for domain: ${domain}`);
-      
-      // Use spawn instead of exec to handle interactive prompts
-      return new Promise((resolve, reject) => {
-        console.log('Executing command: wo site update', domain, '-le');
-        
-        const child = spawn('wo', ['site', 'update', domain, '-le'], {
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-        
-        let stdoutData = '';
-        let stderrData = '';
-        
-        child.stdout.on('data', (data) => {
-          const output = data.toString();
-          stdoutData += output;
-          console.log('Command output:', output);
-          
-          // Check for certificate prompt and respond with '1'
-          if (output.includes('Please select an option from below') && 
-              output.includes('1: Reinstall existing certificate') &&
-              output.includes('Type the appropriate number')) {
-            console.log('Certificate prompt detected, selecting option 1 (Reinstall existing certificate)');
-            child.stdin.write('1\n');
-          }
-        });
-        
-        child.stderr.on('data', (data) => {
-          stderrData += data.toString();
-          console.error('Command stderr:', data.toString());
-        });
-        
-        child.on('close', (code) => {
-          if (code === 0) {
-            console.log('SSL deployment completed for domain:', domain);
-      this.send({
-        type: 'site_operation',
-        operation: 'deploy_ssl',
-        status: 'completed',
-        domain,
-              output: stdoutData
-            });
-            resolve();
-          } else {
-            const errorMessage = `SSL deployment failed with code ${code}: ${stderrData}`;
-            console.error(errorMessage);
-            this.send({
-              type: 'site_operation',
-              operation: 'deploy_ssl',
-              status: 'failed',
-              domain,
-              error: errorMessage
-            });
-            reject(new Error(errorMessage));
-          }
-        });
-        
-        child.on('error', (err) => {
-          console.error('Error spawning process:', err);
-          this.send({
-            type: 'site_operation',
-            operation: 'deploy_ssl',
-            status: 'failed',
-            domain,
-            error: err.message
-          });
-          reject(err);
-        });
-      });
-    } catch (error) {
-      console.error('Error deploying SSL:', error);
-      this.send({
-        type: 'site_operation',
-        operation: 'deploy_ssl',
-        status: 'failed',
-        domain,
-        error: error.message
-      });
-      console.log('SSL deployment failed for domain:', domain);
-    }
-  }
-
-  async handleTurnOffSSL(message) {
-    const { domain } = message;
-    
-    try {
-      this.send({
-        type: 'site_operation',
-        operation: 'turn_off_ssl',
-        status: 'starting',
-        domain
-      });
-      
-      console.log(`Turning off SSL for domain: ${domain}`);
-      
-      // Use spawn instead of exec to handle any interactive prompts
-      return new Promise((resolve, reject) => {
-        console.log('Executing command: wo site update', domain, '--letsencrypt=off');
-        
-        const child = spawn('wo', ['site', 'update', domain, '--letsencrypt=off'], {
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-        
-        let stdoutData = '';
-        let stderrData = '';
-        
-        child.stdout.on('data', (data) => {
-          const output = data.toString();
-          stdoutData += output;
-          console.log('Command output:', output);
-        });
-        
-        child.stderr.on('data', (data) => {
-          stderrData += data.toString();
-          console.error('Command stderr:', data.toString());
-        });
-        
-        child.on('close', (code) => {
-          if (code === 0) {
-            console.log('SSL successfully turned off for domain:', domain);
-            this.send({
-              type: 'site_operation',
-              operation: 'turn_off_ssl',
-              status: 'completed',
-              domain,
-              output: stdoutData
-            });
-            resolve();
-          } else {
-            const errorMessage = `Failed to turn off SSL with code ${code}: ${stderrData}`;
-            console.error(errorMessage);
-            this.send({
-              type: 'site_operation',
-              operation: 'turn_off_ssl',
-              status: 'failed',
-              domain,
-              error: errorMessage
-            });
-            reject(new Error(errorMessage));
-          }
-        });
-        
-        child.on('error', (err) => {
-          console.error('Error spawning process:', err);
-          this.send({
-            type: 'site_operation',
-            operation: 'turn_off_ssl',
-            status: 'failed',
-            domain,
-            error: err.message
-          });
-          reject(err);
-        });
-      });
-    } catch (error) {
-      console.error('Error turning off SSL:', error);
-      this.send({
-        type: 'site_operation',
-        operation: 'turn_off_ssl',
-        status: 'failed',
-        domain,
-        error: error.message
-      });
-      console.log('Failed to turn off SSL for domain:', domain);
     }
   }
 
@@ -472,58 +203,65 @@ class CitrusAgent {
   async handleUpdateAgent(message) {
     try {
       this.send({
-        type: 'update_operation',
+        type: 'status',
+        operation: 'update_agent',
         status: 'starting'
       });
       
-      console.log('Updating agent from git with force reset...');
+      console.log('Updating agent code...');
       
-      // Fetch all changes first
-      await execAsync('git fetch --all');
+      // Run git pull to update the code
+      const { stdout: pullOutput } = await execAsync('git pull');
+      console.log('Git pull output:', pullOutput);
       
-      // Force reset to origin/main (or whatever your branch is)
-      const { stdout, stderr } = await execAsync('git reset --hard origin/main');
-      
-      // Check for errors in stderr
-      const errorIndicators = [
-        'fatal:', 'error:', 'cannot', 'denied', 'Could not', 'not found', 
-        'failed', 'unable to', 'unresolved', 'Permission denied'
-      ];
-      
-      const hasRealError = errorIndicators.some(indicator => 
-        stderr.toLowerCase().includes(indicator.toLowerCase())
-      );
-      
-      if (hasRealError) {
-        throw new Error(`Git update error: ${stderr}`);
+      // Check if any updates were received
+      if (pullOutput.includes('Already up to date.')) {
+        console.log('Agent code is already up to date.');
+        this.send({
+          type: 'status',
+          operation: 'update_agent',
+          status: 'completed',
+          message: 'Agent code is already up to date.',
+          output: pullOutput
+        });
+        
+        // Still report success since we're up to date
+        this.send({
+          type: 'agent_updated',
+          success: true,
+          message: 'Agent is already up to date'
+        });
+        
+        return;
       }
       
       // Get the new git version
-      await this.getGitVersion();
+      const { stdout: versionOutput } = await execAsync('git rev-parse HEAD');
+      const newVersion = versionOutput.trim();
       
-      // Successful update
+      // Install any new dependencies
+      console.log('Installing dependencies...');
+      const { stdout: npmOutput } = await execAsync('npm install');
+      console.log('NPM install output:', npmOutput);
+      
+      // Send a success message before restarting
       this.send({
-        type: 'update_operation',
-        status: 'completed',
-        gitVersion: this.gitVersion,
-        output: stdout + (stderr ? `\n${stderr}` : '')
+        type: 'agent_updated',
+        success: true,
+        version: newVersion
       });
       
-      console.log('Agent updated successfully, restarting service...');
+      // Wait a moment for the message to be sent
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Restart the service using systemctl
-      try {
-        await execAsync('systemctl restart citrus-agent');
-        console.log('Restart command sent. Service will restart shortly.');
-      } catch (restartError) {
-        console.error('Error restarting service:', restartError);
-        // We don't throw here because the update itself was successful
-      }
-      
+      // Restart the process
+      console.log('Restarting agent...');
+      process.exit(0); // PM2 or similar will restart the process
     } catch (error) {
       console.error('Error updating agent:', error);
       this.send({
-        type: 'update_operation',
+        type: 'status',
+        operation: 'update_agent',
         status: 'failed',
         error: error.message
       });
@@ -531,243 +269,47 @@ class CitrusAgent {
   }
 
   async handleRollbackAgent(message) {
+    const { commitId } = message;
+    
     try {
-      const { commitId } = message;
-      
-      if (!commitId) {
-        throw new Error('No commit ID provided for rollback');
-      }
-      
       this.send({
         type: 'rollback_operation',
-        status: 'starting',
-        commitId
+        status: 'starting'
       });
       
-      console.log(`Rolling back agent to commit: ${commitId}`);
+      console.log(`Rolling back agent to commit ${commitId}...`);
       
-      // Fetch all remote changes first to ensure we have the commit
+      // First, fetch all commits
       await execAsync('git fetch --all');
       
-      // Reset to the specific commit with force
-      const { stdout, stderr } = await execAsync(`git reset --hard ${commitId}`);
+      // Reset to the specified commit
+      const { stdout: resetOutput } = await execAsync(`git reset --hard ${commitId}`);
+      console.log('Git reset output:', resetOutput);
       
-      // Check for errors in stderr
-      const errorIndicators = [
-        'fatal:', 'error:', 'cannot', 'denied', 'Could not', 'not found', 
-        'failed', 'unable to', 'unresolved', 'Permission denied', 'unknown revision'
-      ];
+      // Install dependencies for that version
+      console.log('Installing dependencies for rollback version...');
+      const { stdout: npmOutput } = await execAsync('npm install');
+      console.log('NPM install output:', npmOutput);
       
-      const hasRealError = errorIndicators.some(indicator => 
-        stderr.toLowerCase().includes(indicator.toLowerCase())
-      );
-      
-      if (hasRealError) {
-        throw new Error(`Git rollback error: ${stderr}`);
-      }
-      
-      // Get the new git version to confirm rollback
-      await this.getGitVersion();
-      
-      // Successful rollback
+      // Send success before restarting
       this.send({
         type: 'rollback_operation',
         status: 'completed',
-        gitVersion: this.gitVersion,
-        output: stdout + (stderr ? `\n${stderr}` : '')
+        version: commitId
       });
       
-      console.log(`Agent successfully rolled back to ${commitId}, restarting service...`);
+      // Wait a moment for the message to be sent
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Restart the service using systemctl
-      try {
-        await execAsync('systemctl restart citrus-agent');
-        console.log('Restart command sent. Service will restart shortly.');
-      } catch (restartError) {
-        console.error('Error restarting service:', restartError);
-        // We don't throw here because the rollback itself was successful
-      }
-      
+      // Restart the process
+      console.log('Restarting agent after rollback...');
+      process.exit(0); // PM2 or similar will restart the process
     } catch (error) {
       console.error('Error rolling back agent:', error);
       this.send({
         type: 'rollback_operation',
         status: 'failed',
         error: error.message
-      });
-    }
-  }
-
-  async handleRedeploySSL(message) {
-    const { domain } = message;
-    
-    try {
-      this.send({
-        type: 'site_operation',
-        operation: 'redeploy_ssl',
-        status: 'ssl_redeploying',
-        domain
-      });
-      
-      console.log(`Redeploying SSL for domain: ${domain}`);
-      console.log('First turning off SSL...');
-      
-      // Use spawn for the first command to turn off SSL
-      const turnOffResult = await new Promise((resolve, reject) => {
-        console.log('Executing command: wo site update', domain, '--letsencrypt=off');
-        
-        const turnOffChild = spawn('wo', ['site', 'update', domain, '--letsencrypt=off'], {
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-        
-        let turnOffStdoutData = '';
-        let turnOffStderrData = '';
-        
-        turnOffChild.stdout.on('data', (data) => {
-          const output = data.toString();
-          turnOffStdoutData += output;
-          console.log('Turn off SSL output:', output);
-        });
-        
-        turnOffChild.stderr.on('data', (data) => {
-          turnOffStderrData += data.toString();
-          console.error('Turn off SSL stderr:', data.toString());
-        });
-        
-        turnOffChild.on('close', (code) => {
-          if (code === 0) {
-            console.log('SSL successfully turned off for domain:', domain);
-            resolve(true);
-          } else {
-            // Even if turning off fails, we'll still try to redeploy
-            // Sometimes the SSL might not be active yet
-            console.warn(`Warning: Failed to turn off SSL with code ${code}: ${turnOffStderrData}`);
-            resolve(false);
-          }
-        });
-        
-        turnOffChild.on('error', (err) => {
-          console.error('Error spawning turn off SSL process:', err);
-          // Continue with redeploy even if turn off fails
-          resolve(false);
-        });
-      });
-      
-      console.log('Now deploying SSL with force renewal...');
-      
-      // Use spawn for the second command to deploy SSL
-      return new Promise((resolve, reject) => {
-        console.log('Executing command: wo site update', domain, '-le');
-        
-        const child = spawn('wo', ['site', 'update', domain, '-le'], {
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-        
-        let stdoutData = '';
-        let stderrData = '';
-        
-        child.stdout.on('data', (data) => {
-          const output = data.toString();
-          stdoutData += output;
-          console.log('Command output:', output);
-          
-          // Check for certificate prompt and always choose option 2 for force renewal
-          if (output.includes('Please select an option from below') && 
-              output.includes('Type the appropriate number')) {
-            console.log('Certificate prompt detected, selecting option 2 (Force renewal)');
-            child.stdin.write('2\n');
-          }
-        });
-        
-        child.stderr.on('data', (data) => {
-          stderrData += data.toString();
-          console.error('Command stderr:', data.toString());
-        });
-        
-        child.on('close', (code) => {
-          if (code === 0) {
-            console.log('SSL redeployment completed for domain:', domain);
-            this.send({
-              type: 'site_operation',
-              operation: 'redeploy_ssl',
-              status: 'completed',
-              domain,
-              output: stdoutData
-            });
-            resolve();
-          } else {
-            const errorMessage = `SSL redeployment failed with code ${code}: ${stderrData}`;
-            console.error(errorMessage);
-            this.send({
-              type: 'site_operation',
-              operation: 'redeploy_ssl',
-              status: 'failed',
-              domain,
-              error: errorMessage
-            });
-            reject(new Error(errorMessage));
-          }
-        });
-        
-        child.on('error', (err) => {
-          console.error('Error spawning process:', err);
-          this.send({
-            type: 'site_operation',
-            operation: 'redeploy_ssl',
-            status: 'failed',
-            domain,
-            error: err.message
-          });
-          reject(err);
-        });
-      });
-    } catch (error) {
-      console.error('Error redeploying SSL:', error);
-      this.send({
-        type: 'site_operation',
-        operation: 'redeploy_ssl',
-        status: 'failed',
-        domain,
-        error: error.message
-      });
-      console.log('SSL redeployment failed for domain:', domain);
-    }
-  }
-
-  async handleSiteInfo(message) {
-    const { domain } = message;
-    
-    try {
-      console.log(`Checking site info for domain: ${domain}`);
-      
-      // Get site info using wo command
-      const command = `wo site info ${domain} --json`;
-      const { stdout } = await execAsync(command);
-      
-      // Parse the JSON output
-      const siteInfo = JSON.parse(stdout);
-      
-      // Extract SSL status
-      const ssl = {
-        enabled: siteInfo.ssl_enabled || false,
-        provider: siteInfo.ssl_provider || null,
-        expiry: siteInfo.ssl_expiry || null
-      };
-      
-      // Send response back to engine
-      this.send({
-        type: 'site_info_response',
-        domain,
-        ssl
-      });
-      
-      console.log(`Sent site info response for ${domain}:`, ssl);
-    } catch (error) {
-      console.error(`Error getting site info for ${domain}:`, error);
-      this.send({
-        type: 'error',
-        error: `Failed to get site info: ${error.message}`,
-        domain
       });
     }
   }
