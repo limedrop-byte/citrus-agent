@@ -146,25 +146,29 @@ class CitrusAgent {
 
     console.log('Service status:', services);
 
+    // Get main disk usage (usually the root filesystem)
+    const mainDisk = disk.find(d => d.fs === '/' || d.mount === '/') || disk[0];
+    const diskUsage = {
+      total: Math.round(mainDisk.size / (1024 * 1024 * 1024)), // GB
+      used: Math.round(mainDisk.used / (1024 * 1024 * 1024)),  // GB
+      free: Math.round((mainDisk.size - mainDisk.used) / (1024 * 1024 * 1024)), // GB
+      percentage: Math.round((mainDisk.used / mainDisk.size) * 100)
+    };
+
     return {
       hostname: os.hostname(),
       uptime: os.uptime(),
       gitVersion: this.gitVersion,
       cpu: {
-        load: cpu.currentLoad,
+        load: Math.round(cpu.currentLoad * 100) / 100, // Round to 2 decimals
         cores: os.cpus().length
       },
       memory: {
-        total: mem.total,
-        used: mem.used,
-        free: mem.free
+        total: Math.round(mem.total / (1024 * 1024 * 1024)), // GB
+        used: Math.round(mem.used / (1024 * 1024 * 1024)),   // GB
+        free: Math.round(mem.free / (1024 * 1024 * 1024))    // GB
       },
-      disk: disk.map(d => ({
-        fs: d.fs,
-        size: d.size,
-        used: d.used,
-        available: d.available
-      })),
+      disk: diskUsage,
       services,
       timestamp: Date.now()
     };
