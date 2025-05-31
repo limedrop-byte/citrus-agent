@@ -120,9 +120,11 @@ class CitrusAgent {
   async checkServiceStatus(serviceName) {
     try {
       const { stdout } = await execAsync(`systemctl is-active ${serviceName}`);
-      return stdout.trim() === 'active';
+      const status = stdout.trim();
+      console.log(`Service ${serviceName}: ${status}`);
+      return status === 'active';
     } catch (error) {
-      // If systemctl command fails, the service is likely not running
+      console.log(`Service ${serviceName}: error checking status - ${error.message}`);
       return false;
     }
   }
@@ -136,11 +138,13 @@ class CitrusAgent {
       si.fsSize()
     ]);
 
-    // Check service statuses
+    // Check service status for MariaDB and OpenLiteSpeed (which handles PHP)
     const services = {
       mariadb: await this.checkServiceStatus('mariadb'),
-      php: await this.checkServiceStatus('php8.2-fpm') // or php-fpm depending on your setup
+      openlitespeed: await this.checkServiceStatus('lshttpd')  // OpenLiteSpeed handles PHP
     };
+
+    console.log('Service status:', services);
 
     return {
       hostname: os.hostname(),
