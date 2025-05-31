@@ -117,6 +117,16 @@ class CitrusAgent {
     }
   }
 
+  async checkServiceStatus(serviceName) {
+    try {
+      const { stdout } = await execAsync(`systemctl is-active ${serviceName}`);
+      return stdout.trim() === 'active';
+    } catch (error) {
+      // If systemctl command fails, the service is likely not running
+      return false;
+    }
+  }
+
   async collectStatus() {
     await this.getGitVersion();
     
@@ -125,6 +135,12 @@ class CitrusAgent {
       si.mem(),
       si.fsSize()
     ]);
+
+    // Check service statuses
+    const services = {
+      mariadb: await this.checkServiceStatus('mariadb'),
+      php: await this.checkServiceStatus('php8.2-fpm') // or php-fpm depending on your setup
+    };
 
     return {
       hostname: os.hostname(),
@@ -145,6 +161,7 @@ class CitrusAgent {
         used: d.used,
         available: d.available
       })),
+      services,
       timestamp: Date.now()
     };
   }
