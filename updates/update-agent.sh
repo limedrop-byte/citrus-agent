@@ -41,10 +41,10 @@ echo "Updating Node.js dependencies..."
 npm install
 
 # Check if logging upgrade script exists and run it
-if [ -f ./upgrade-logging.sh ]; then
+if [ -f ./updates/upgrade-logging.sh ]; then
     echo "Found logging upgrade script, executing..."
-    chmod +x ./upgrade-logging.sh
-    ./upgrade-logging.sh
+    chmod +x ./updates/upgrade-logging.sh
+    ./updates/upgrade-logging.sh
 else
     echo "No logging upgrade script found, skipping..."
     
