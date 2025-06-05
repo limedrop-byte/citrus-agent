@@ -238,19 +238,30 @@ class CitrusAgent {
       
       console.log('Updating agent code...');
       
-      // Run git pull to update the code
-      const { stdout: pullOutput } = await execAsync('git pull');
-      console.log('Git pull output:', pullOutput);
+      // First, fetch all commits to ensure we have the latest refs
+      await execAsync('git fetch --all');
+      
+      // Get current commit before reset
+      const { stdout: currentCommit } = await execAsync('git rev-parse HEAD');
+      const beforeVersion = currentCommit.trim();
+      
+      // Force reset to latest origin/main (or whatever the default branch is)
+      const { stdout: resetOutput } = await execAsync('git reset --hard origin/main');
+      console.log('Git reset output:', resetOutput);
+      
+      // Get new commit after reset
+      const { stdout: newCommit } = await execAsync('git rev-parse HEAD');
+      const afterVersion = newCommit.trim();
       
       // Check if any updates were received
-      if (pullOutput.includes('Already up to date.')) {
+      if (beforeVersion === afterVersion) {
         console.log('Agent code is already up to date.');
         this.send({
           type: 'status',
           operation: 'update_agent',
           status: 'completed',
           message: 'Agent code is already up to date.',
-          output: pullOutput
+          output: resetOutput
         });
         
         // Still report success since we're up to date
@@ -263,9 +274,8 @@ class CitrusAgent {
         return;
       }
       
-      // Get the new git version
-      const { stdout: versionOutput } = await execAsync('git rev-parse HEAD');
-      const newVersion = versionOutput.trim();
+      // Use the version we already got after the reset
+      const newVersion = afterVersion;
       
       // Install any new dependencies
       console.log('Installing dependencies...');
