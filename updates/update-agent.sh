@@ -13,33 +13,76 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Stop the agent service temporarily
-echo "Stopping citrus-agent service..."
-systemctl stop citrus-agent
+v6 - no stoppin# Check if systemd service needs updating
+SERVICE_NEEDS_RESTART=false
+echo "Checking if systemd service needs updating..."
 
-# Backup existing log file if it exists
-if [ -f /var/log/citrus-agent.log ]; then
-    echo "Backing up existing log file..."
-    mkdir -p /var/log/citrus-agent-backup
-    cp /var/log/citrus-agent.log /var/log/citrus-agent-backup/agent.log.backup.$(date +%Y%m%d_%H%M%S)
-    echo "Backup created in /var/log/citrus-agent-backup/"
+if [ -f /etc/systemd/system/citrus-agent.service ]; then
+    # Check if service file still uses old log path
+    if grep -q "/var/log/citrus-agent\.log" /etc/systemd/system/citrus-agent.service; then
+        echo "Service file needs updating for new log paths"
+        SERVICE_NEEDS_RESTART=true
+    else
+        echo "Service file already uses correct log paths"
+    fi
+else
+    echo "WARNING: /etc/systemd/system/citrus-agent.service not found"
 fi
 
-# Create new log directory structure
+# Create new log directory structure (safe to do while service is running)
 echo "Setting up new logging directory structure..."
 mkdir -p /var/log/citrus-agent
 touch /var/log/citrus-agent/agent.log
 chmod 644 /var/log/citrus-agent/agent.log
 chown root:root /var/log/citrus-agent/agent.log
 
-# Move existing log content to new location if it exists
-if [ -f /var/log/citrus-agent.log ]; then
-    echo "Migrating existing log content..."
-    cat /var/log/citrus-agent.log >> /var/log/citrus-agent/agent.log
-    rm /var/log/citrus-agent.log
+# Only stop service if we need to update systemd configuration
+if [ "$SERVICE_NEEDS_RESTART" = true ]; then
+    echo "Stopping citrus-agent service for configuration update..."
+    systemctl stop citrus-agent
+    
+    # Backup and migrate existing log file if it exists
+    if [ -f /var/log/citrus-agent.log ]; then
+        echo "Backing up and migrating existing log file..."
+        mkdir -p /var/log/citrus-agent-backup
+        cp /var/log/citrus-agent.log /var/log/citrus-agent-backup/agent.log.backup.$(date +%Y%m%d_%H%M%S)
+        echo "Backup created in /var/log/citrus-agent-backup/"
+        
+        # Migrate content to new location
+        cat /var/log/citrus-agent.log >> /var/log/citrus-agent/agent.log
+        rm /var/log/citrus-agent.log
+        echo "Log content migrated to new location"
+    fi
+    
+    # Update systemd service configuration
+    echo "Updating systemd service configuration..."
+    cp /etc/systemd/system/citrus-agent.service /etc/systemd/system/citrus-agent.service.backup
+    
+    # Update log paths in service file
+    sed -i 's|StandardOutput=append:/var/log/citrus-agent.log|StandardOutput=append:/var/log/citrus-agent/agent.log|g' /etc/systemd/system/citrus-agent.service
+    sed -i 's|StandardError=append:/var/log/citrus-agent.log|StandardError=append:/var/log/citrus-agent/agent.log|g' /etc/systemd/system/citrus-agent.service
+    
+    # Reload systemd daemon
+    systemctl daemon-reload
+    echo "Systemd service updated"
+    
+    # Start the service again
+    echo "Starting citrus-agent service..."
+    systemctl start citrus-agent
+else
+    echo "No service restart needed, service remains running"
+    
+    # Just backup existing log file if it exists (don't migrate while service is running)
+    if [ -f /var/log/citrus-agent.log ]; then
+        echo "Backing up existing log file..."
+        mkdir -p /var/log/citrus-agent-backup
+        cp /var/log/citrus-agent.log /var/log/citrus-agent-backup/agent.log.backup.$(date +%Y%m%d_%H%M%S)
+        echo "Backup created in /var/log/citrus-agent-backup/"
+        echo "Note: Old log file left in place since service is still running"
+    fi
 fi
 
-# Create logrotate configuration
+# Create logrotate configuration (safe to do while service is running)
 echo "Setting up log rotation configuration..."
 cat > /etc/logrotate.d/citrus-agent << 'EOL'
 /var/log/citrus-agent/agent.log {
@@ -56,30 +99,9 @@ cat > /etc/logrotate.d/citrus-agent << 'EOL'
 }
 EOL
 
-# Update systemd service to use new log location
-echo "Updating systemd service configuration..."
-if [ -f /etc/systemd/system/citrus-agent.service ]; then
-    # Backup existing service file
-    cp /etc/systemd/system/citrus-agent.service /etc/systemd/system/citrus-agent.service.backup
-    
-    # Update log paths in service file
-    sed -i 's|StandardOutput=append:/var/log/citrus-agent.log|StandardOutput=append:/var/log/citrus-agent/agent.log|g' /etc/systemd/system/citrus-agent.service
-    sed -i 's|StandardError=append:/var/log/citrus-agent.log|StandardError=append:/var/log/citrus-agent/agent.log|g' /etc/systemd/system/citrus-agent.service
-    
-    # Reload systemd daemon
-    systemctl daemon-reload
-    echo "Systemd service updated"
-else
-    echo "WARNING: /etc/systemd/system/citrus-agent.service not found"
-fi
-
 # Test logrotate configuration
 echo "Testing logrotate configuration..."
 logrotate -d /etc/logrotate.d/citrus-agent
-
-# Start the agent service
-echo "Starting citrus-agent service..."
-systemctl start citrus-agent
 
 # Verify service is running
 sleep 2
