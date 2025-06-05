@@ -179,9 +179,6 @@ class CitrusAgent {
       console.log('Received message:', message.type, 'Full message:', JSON.stringify(message));
       
       switch (message.type) {
-        case 'ping':
-          this.handlePing(message);
-          break;
         case 'update_agent':
           await this.handleUpdateAgent(message);
           break;
@@ -297,15 +294,6 @@ class CitrusAgent {
         error: error.message
       });
     }
-  }
-
-  handlePing(message) {
-    // Respond immediately to ping with pong
-    this.send({
-      type: 'pong',
-      timestamp: Date.now(),
-      originalPingTimestamp: message.timestamp
-    });
   }
 
   async handleSystemUpdate(message) {
