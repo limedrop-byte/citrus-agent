@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Citrus Agent Update Script
-# This script updates the agent from git and applies any necessary system upgrades
+# Citrus Agent System Update Script
+# This script handles system-level updates like logging configuration
 
-echo "=== Citrus Agent Update ==="
-echo "Starting agent update at $(date)"
+echo "=== Citrus Agent System Update ==="
+echo "Starting system update at $(date)"
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -13,54 +13,91 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Navigate to agent directory
-cd /opt/citrus-agent || {
-    echo "ERROR: Could not find /opt/citrus-agent directory"
-    exit 1
-}
-
-echo "Current directory: $(pwd)"
-
-# Backup current .env file
-if [ -f .env ]; then
-    cp .env .env.backup
-    echo "✅ Environment file backed up"
-fi
-
-# Stop the agent service
+# Stop the agent service temporarily
 echo "Stopping citrus-agent service..."
 systemctl stop citrus-agent
 
-# Pull latest changes from git
-echo "Pulling latest changes from git..."
-git fetch origin
-git pull origin main || git pull origin master
-
-# Install/update dependencies
-echo "Updating Node.js dependencies..."
-npm install
-
-# Check if logging upgrade script exists and run it
-if [ -f ./updates/upgrade-logging.sh ]; then
-    echo "Found logging upgrade script, executing..."
-    chmod +x ./updates/upgrade-logging.sh
-    ./updates/upgrade-logging.sh
-else
-    echo "No logging upgrade script found, skipping..."
-    
-    # Start the agent service normally
-    echo "Starting citrus-agent service..."
-    systemctl start citrus-agent
+# Backup existing log file if it exists
+if [ -f /var/log/citrus-agent.log ]; then
+    echo "Backing up existing log file..."
+    mkdir -p /var/log/citrus-agent-backup
+    cp /var/log/citrus-agent.log /var/log/citrus-agent-backup/agent.log.backup.$(date +%Y%m%d_%H%M%S)
+    echo "Backup created in /var/log/citrus-agent-backup/"
 fi
+
+# Create new log directory structure
+echo "Setting up new logging directory structure..."
+mkdir -p /var/log/citrus-agent
+touch /var/log/citrus-agent/agent.log
+chmod 644 /var/log/citrus-agent/agent.log
+chown root:root /var/log/citrus-agent/agent.log
+
+# Move existing log content to new location if it exists
+if [ -f /var/log/citrus-agent.log ]; then
+    echo "Migrating existing log content..."
+    cat /var/log/citrus-agent.log >> /var/log/citrus-agent/agent.log
+    rm /var/log/citrus-agent.log
+fi
+
+# Create logrotate configuration
+echo "Setting up log rotation configuration..."
+cat > /etc/logrotate.d/citrus-agent << 'EOL'
+/var/log/citrus-agent/agent.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 root root
+    postrotate
+        systemctl reload citrus-agent 2>/dev/null || true
+    endscript
+}
+EOL
+
+# Update systemd service to use new log location
+echo "Updating systemd service configuration..."
+if [ -f /etc/systemd/system/citrus-agent.service ]; then
+    # Backup existing service file
+    cp /etc/systemd/system/citrus-agent.service /etc/systemd/system/citrus-agent.service.backup
+    
+    # Update log paths in service file
+    sed -i 's|StandardOutput=append:/var/log/citrus-agent.log|StandardOutput=append:/var/log/citrus-agent/agent.log|g' /etc/systemd/system/citrus-agent.service
+    sed -i 's|StandardError=append:/var/log/citrus-agent.log|StandardError=append:/var/log/citrus-agent/agent.log|g' /etc/systemd/system/citrus-agent.service
+    
+    # Reload systemd daemon
+    systemctl daemon-reload
+    echo "Systemd service updated"
+else
+    echo "WARNING: /etc/systemd/system/citrus-agent.service not found"
+fi
+
+# Test logrotate configuration
+echo "Testing logrotate configuration..."
+logrotate -d /etc/logrotate.d/citrus-agent
+
+# Start the agent service
+echo "Starting citrus-agent service..."
+systemctl start citrus-agent
 
 # Verify service is running
 sleep 2
 if systemctl is-active --quiet citrus-agent; then
     echo "✅ Citrus Agent service is running"
-    echo "✅ Agent update completed successfully"
 else
     echo "❌ WARNING: Citrus Agent service failed to start"
     echo "Check logs with: journalctl -u citrus-agent.service"
 fi
 
-echo "Agent update completed at $(date)" 
+# Display new log locations
+echo ""
+echo "=== System Update Complete ==="
+echo "✅ New log location: /var/log/citrus-agent/agent.log"
+echo "✅ Log rotation: Daily with 30-day retention"
+echo "✅ Old logs backed up to: /var/log/citrus-agent-backup/"
+echo ""
+echo "To view current logs: tail -f /var/log/citrus-agent/agent.log"
+echo "To test log rotation: sudo logrotate -f /etc/logrotate.d/citrus-agent"
+echo ""
+echo "System update completed at $(date)" 
