@@ -317,24 +317,83 @@ class CitrusAgent {
       // Make sure the script is executable
       await execAsync(`chmod +x ${installScriptPath}`);
       
-      // Run the system update script
+      // Run the system update script with real-time output streaming
       console.log('Executing system update script...');
-      const { stdout, stderr } = await execAsync(`sudo ${installScriptPath}`);
       
-      console.log('System update output:', stdout);
-      if (stderr) {
-        console.log('System update stderr:', stderr);
-      }
-      
-      // Check if the script succeeded (exit code was 0 if we get here)
-      this.send({
-        type: 'status',
-        operation: 'system_update',
-        status: 'completed',
-        output: stdout + (stderr ? `\n${stderr}` : '')
+      await new Promise((resolve, reject) => {
+        const { spawn } = require('child_process');
+        const child = spawn('sudo', [installScriptPath], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          cwd: '/opt/citrus-agent'
+        });
+        
+        let allOutput = '';
+        
+        // Stream stdout in real-time
+        child.stdout.on('data', (data) => {
+          const output = data.toString();
+          console.log('SYSTEM UPDATE:', output);
+          allOutput += output;
+          
+          // Send real-time updates
+          this.send({
+            type: 'status',
+            operation: 'system_update',
+            status: 'running',
+            output: output.trim()
+          });
+        });
+        
+        // Stream stderr in real-time
+        child.stderr.on('data', (data) => {
+          const output = data.toString();
+          console.log('SYSTEM UPDATE ERROR:', output);
+          allOutput += output;
+          
+          // Send real-time error updates
+          this.send({
+            type: 'status',
+            operation: 'system_update',
+            status: 'running',
+            error: output.trim()
+          });
+        });
+        
+        child.on('close', (code) => {
+          if (code === 0) {
+            console.log('System update completed successfully');
+            this.send({
+              type: 'status',
+              operation: 'system_update',
+              status: 'completed',
+              output: 'System update completed successfully',
+              fullOutput: allOutput
+            });
+            resolve();
+          } else {
+            console.error(`System update failed with exit code ${code}`);
+            this.send({
+              type: 'status',
+              operation: 'system_update',
+              status: 'failed',
+              error: `System update failed with exit code ${code}`,
+              fullOutput: allOutput
+            });
+            reject(new Error(`System update failed with exit code ${code}`));
+          }
+        });
+        
+        child.on('error', (error) => {
+          console.error('Error spawning system update process:', error);
+          this.send({
+            type: 'status',
+            operation: 'system_update',
+            status: 'failed',
+            error: `Process spawn error: ${error.message}`
+          });
+          reject(error);
+        });
       });
-      
-      console.log('System update completed successfully');
       
     } catch (error) {
       console.error('Error performing system update:', error);
