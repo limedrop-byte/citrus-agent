@@ -182,6 +182,9 @@ class CitrusAgent {
         case 'update_agent':
           await this.handleUpdateAgent(message);
           break;
+        case 'system_update':
+          await this.handleSystemUpdate(message);
+          break;
         case 'rollback_agent':
           await this.handleRollbackAgent(message);
           break;
@@ -287,6 +290,57 @@ class CitrusAgent {
       this.send({
         type: 'status',
         operation: 'update_agent',
+        status: 'failed',
+        error: error.message
+      });
+    }
+  }
+
+  async handleSystemUpdate(message) {
+    try {
+      this.send({
+        type: 'status',
+        operation: 'system_update',
+        status: 'starting'
+      });
+      
+      console.log('Running system-level update...');
+      
+      // Check if the install.sh script exists
+      const installScriptPath = '/opt/citrus-agent/updates/install.sh';
+      try {
+        await execAsync(`test -f ${installScriptPath}`);
+      } catch (error) {
+        throw new Error(`System update script not found at ${installScriptPath}`);
+      }
+      
+      // Make sure the script is executable
+      await execAsync(`chmod +x ${installScriptPath}`);
+      
+      // Run the system update script
+      console.log('Executing system update script...');
+      const { stdout, stderr } = await execAsync(`sudo ${installScriptPath}`);
+      
+      console.log('System update output:', stdout);
+      if (stderr) {
+        console.log('System update stderr:', stderr);
+      }
+      
+      // Check if the script succeeded (exit code was 0 if we get here)
+      this.send({
+        type: 'status',
+        operation: 'system_update',
+        status: 'completed',
+        output: stdout + (stderr ? `\n${stderr}` : '')
+      });
+      
+      console.log('System update completed successfully');
+      
+    } catch (error) {
+      console.error('Error performing system update:', error);
+      this.send({
+        type: 'status',
+        operation: 'system_update',
         status: 'failed',
         error: error.message
       });
